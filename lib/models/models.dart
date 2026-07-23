@@ -66,6 +66,21 @@ class Pet {
   factory Pet.fromJson(Map<String, dynamic> json) => _$PetFromJson(json);
   Map<String, dynamic> toJson() => _$PetToJson(this);
 
+  factory Pet.fromMap(Map<String, dynamic> map) {
+    return Pet(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      rarity: map['rarity'] as String,
+      level: map['level'] as int,
+      attack: map['attack'] as int,
+      defense: map['defense'] as int,
+      speed: map['speed'] as int,
+      skills: (map['skills'] as String).split(','),
+      element: map['element'] as String,
+      synergy: map['synergy'] as String,
+    );
+  }
+
   int get totalStats => attack + defense + speed;
 }
 
@@ -96,6 +111,19 @@ class Heritage {
   factory Heritage.fromJson(Map<String, dynamic> json) =>
       _$HeritageFromJson(json);
   Map<String, dynamic> toJson() => _$HeritageToJson(this);
+
+  factory Heritage.fromMap(Map<String, dynamic> map) {
+    return Heritage(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      description: map['description'] as String,
+      type: map['type'] as String,
+      level: map['level'] as int,
+      bonus: map['bonus'] as int,
+      rarity: map['rarity'] as String,
+      compatibility: (map['compatibility'] as String).split(','),
+    );
+  }
 }
 
 // ============ SKILLS & ABILITIES ============
@@ -126,6 +154,20 @@ class Skill {
 
   factory Skill.fromJson(Map<String, dynamic> json) => _$SkillFromJson(json);
   Map<String, dynamic> toJson() => _$SkillToJson(this);
+
+  factory Skill.fromMap(Map<String, dynamic> map) {
+    return Skill(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      description: map['description'] as String,
+      type: map['type'] as String,
+      cooldown: map['cooldown'] as int,
+      manaCost: map['manaCost'] as int,
+      damage: map['damage'] as int,
+      level: map['level'] as int,
+      element: map['element'] as String,
+    );
+  }
 }
 
 // ============ FASES ============
@@ -155,6 +197,24 @@ class GamePhase {
   factory GamePhase.fromJson(Map<String, dynamic> json) =>
       _$GamePhaseFromJson(json);
   Map<String, dynamic> toJson() => _$GamePhaseToJson(this);
+
+  factory GamePhase.fromMap(Map<String, dynamic> map) {
+    return GamePhase(
+      phaseNumber: map['phaseNumber'] as int,
+      name: map['name'] as String,
+      description: map['description'] as String,
+      recommendedLevel: map['recommendedLevel'] as int,
+      difficulty: map['difficulty'] as int,
+      enemies: _decodeEnemies(map['enemies'] as String),
+      rewards: map['rewards'] as int,
+      strategy: map['strategy'] as String,
+    );
+  }
+
+  static List<Enemy> _decodeEnemies(String encoded) {
+    // Placeholder - seria implementado com serialização JSON completa
+    return [];
+  }
 }
 
 // ============ INIMIGOS ============
@@ -225,6 +285,26 @@ class Build {
 
   factory Build.fromJson(Map<String, dynamic> json) => _$BuildFromJson(json);
   Map<String, dynamic> toJson() => _$BuildToJson(this);
+
+  factory Build.fromMap(Map<String, dynamic> map) {
+    return Build(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      description: map['description'] as String,
+      type: map['type'] as String,
+      petIds: (map['petIds'] as String).split(',').where((id) => id.isNotEmpty).toList(),
+      heritageIds: (map['heritageIds'] as String).split(',').where((id) => id.isNotEmpty).toList(),
+      skillIds: (map['skillIds'] as String).split(',').where((id) => id.isNotEmpty).toList(),
+      minLevel: map['minLevel'] as int,
+      efficiency: (map['efficiency'] as num).toDouble(),
+      compatiblePhases: (map['compatiblePhases'] as String)
+          .split(',')
+          .where((p) => p.isNotEmpty)
+          .map(int.parse)
+          .toList(),
+      strategy: map['strategy'] as String,
+    );
+  }
 }
 
 // ============ RECOMENDAÇÃO ============
