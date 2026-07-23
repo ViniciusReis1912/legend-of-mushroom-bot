@@ -1,20 +1,18 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:legend_of_mushroom_bot/models/models.dart';
-import 'package:legend_of_mushroom_bot/database/database_helper.dart';
 
 class AnalysisProvider extends ChangeNotifier {
-  final db = DatabaseHelper();
+  Recommendation? _currentRecommendation;
+  List<Build> _suggestedCounterBuilds = [];
+  bool _isAnalyzing = false;
+  String? _error;
 
-  Recommendation? currentRecommendation;
-  List<Recommendation> allRecommendations = [];
-  PvPOpponent? analyzedOpponent;
-  List<Build> suggestedCounterBuilds = [];
-  bool isAnalyzing = false;
-  String? error;
+  Recommendation? get currentRecommendation => _currentRecommendation;
+  List<Build> get suggestedCounterBuilds => _suggestedCounterBuilds;
+  bool get isAnalyzing => _isAnalyzing;
+  String? get error => _error;
 
-  // ============ ANÁLISE DE FASE ============
-
-  Future<Recommendation?> analyzePhase({
+  Future<void> analyzePhase({
     required int phaseNumber,
     required int playerLevel,
     required int playerAttack,
@@ -23,331 +21,172 @@ class AnalysisProvider extends ChangeNotifier {
     required List<Pet> playerPets,
     required List<Heritage> playerHeritages,
   }) async {
-    isAnalyzing = true;
+    _isAnalyzing = true;
+    _error = null;
     notifyListeners();
 
     try {
-      final phase = await db.getPhaseByNumber(phaseNumber);
-      if (phase == null) {
-        error = 'Fase não encontrada';
-        isAnalyzing = false;
-        notifyListeners();
-        return null;
-      }
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // Calcular dificuldade relativa
-      final difficultyGap = phase.difficulty - (playerLevel ~/ 10);
-      final isPhaseDoable = playerLevel >= phase.recommendedLevel;
+      final difficulty = _calculateDifficulty(
+        phaseNumber,
+        playerLevel,
+        playerAttack,
+        playerDefense,
+      );
 
-      if (!isPhaseDoable) {
-        currentRecommendation = Recommendation(
-          title: 'Nível insuficiente',
-          description:
-              'Você precisa de nível ${phase.recommendedLevel} para essa fase (você tem ${playerLevel})',
-          priority: 'HIGH',
-          action: 'Farm na fase anterior para subir de nível',
-          expectedDifficultyReduction: 0,
-          suggestedBuild: await _getSuggestedBuild(phaseNumber, playerLevel),
-        );
-      } else {
-        // Analisar build recomendado
-        final suggestedBuild =
-            await _analyzePhaseEnemies(phase, playerPets, playerHeritages);
-        final synergy = _calculateTeamSynergy(playerPets, playerHeritages);
-        final effectiveness = _calculateEffectiveness(
-          playerPets,
-          phase.enemies,
-          playerAttack,
-          playerDefense,
-        );
+      final recommendation = _generateRecommendation(
+        phaseNumber: phaseNumber,
+        difficulty: difficulty,
+        playerLevel: playerLevel,
+        playerPets: playerPets,
+      );
 
-        currentRecommendation = Recommendation(
-          title: 'Build Recomendado para ${phase.name}',
-          description: suggestedBuild.strategy,
-          priority: effectiveness < 50 ? 'HIGH' : 'MEDIUM',
-          action: _generateAction(phase, effectiveness, synergy),
-          expectedDifficultyReduction: (effectiveness * 0.8).toInt(),
-          suggestedBuild: suggestedBuild,
-        );
-      }
-
-      error = null;
+      _currentRecommendation = recommendation;
     } catch (e) {
-      error = 'Erro ao analisar fase: $e';
-      currentRecommendation = null;
+      _error = 'Erro ao analisar a fase: $e';
     } finally {
-      isAnalyzing = false;
+      _isAnalyzing = false;
       notifyListeners();
     }
-
-    return currentRecommendation;
   }
 
-  Future<Build> _analyzePhaseEnemies(
-    GamePhase phase,
-    List<Pet> playerPets,
-    List<Heritage> playerHeritages,
-  ) async {
-    // Encontrar elemento fraco dos inimigos
-    final enemyElements =
-        phase.enemies.map((e) => e.element).toSet().toList();
-    final recommendedElements = _getCounterElements(enemyElements);
-
-    // Buscar pets com elementos recomendados
-    final allPets = await db.getAllPets();
-    final recommendedPets = allPets
-        .where((p) => recommendedElements.contains(p.element))
-        .toList()
-      ..sort((a, b) => b.attack.compareTo(a.attack));
-
-    // Criar build sugerido
-    final build = Build(
-      id: 'auto_${phase.phaseNumber}',
-      name: 'Build para ${phase.name}',
-      description:
-          'Build otimizado contra ${enemyElements.join(", ")}',
-      type: 'PvE',
-      petIds: recommendedPets.take(3).map((p) => p.id).toList(),
-      heritageIds: [],
-      skillIds: [],
-      minLevel: phase.recommendedLevel,
-      efficiency: 75.0,
-      compatiblePhases: [phase.phaseNumber],
-      strategy: _generateStrategy(phase, recommendedPets),
-    );
-
-    return build;
-  }
-
-  List<String> _getCounterElements(List<String> enemyElements) {
-    final elementChart = {
-      'Fire': 'Water',
-      'Water': 'Grass',
-      'Grass': 'Electric',
-      'Electric': 'Water',
-      'Ice': 'Fire',
-      'Rock': 'Water',
-    };
-
-    final counters = <String>{};
-    for (final element in enemyElements) {
-      final counter = elementChart[element];
-      if (counter != null) counters.add(counter);
-    }
-
-    return counters.toList();
-  }
-
-  String _generateStrategy(GamePhase phase, List<Pet> recommendedPets) {
-    final petNames = recommendedPets.take(3).map((p) => p.name).join(', ');
-    return '''
-Estratégia para ${phase.name}:
-
-1. Use pets com elemento ${phase.enemies.first.weakness} para contra-atacar
-2. Pets recomendados: $petNames
-3. Foque em atacar ${phase.enemies.first.name} primeiro
-4. Mantenha defesa alta contra ${phase.enemies.last.name}
-5. Use skills especiais quando mana estiver cheia
-''';
-  }
-
-  double _calculateTeamSynergy(
-      List<Pet> pets, List<Heritage> heritages) {
-    if (pets.isEmpty) return 0;
-
-    // Calcular sinergia entre pets
-    double synergy = 0;
-    final elements = pets.map((p) => p.element).toSet();
-
-    // Bônus por variedade de elementos
-    synergy += elements.length * 10;
-
-    // Bônus por heritages
-    synergy += heritages.length * 5;
-
-    return synergy.clamp(0, 100);
-  }
-
-  double _calculateEffectiveness(
-    List<Pet> pets,
-    List<Enemy> enemies,
-    int playerAttack,
-    int playerDefense,
-  ) {
-    if (pets.isEmpty || enemies.isEmpty) return 0;
-
-    double avgPetAttack = pets.fold(0, (sum, p) => sum + p.attack) / pets.length;
-    double avgEnemyDefense =
-        enemies.fold(0, (sum, e) => sum + e.defense) / enemies.length;
-
-    final effectiveness = ((avgPetAttack - avgEnemyDefense) / avgEnemyDefense) *
-        100 +
-        50;
-    return effectiveness.clamp(0, 100);
-  }
-
-  String _generateAction(
-      GamePhase phase, double effectiveness, double synergy) {
-    if (effectiveness < 50) {
-      return 'Suba de nível e melhore seus pets antes de tentar essa fase';
-    } else if (synergy < 30) {
-      return 'Melhore a sinergia do seu time ajustando heranças e skills';
-    } else {
-      return 'Seu time está pronto! Execute a estratégia recomendada';
-    }
-  }
-
-  Future<Build> _getSuggestedBuild(int phaseNumber, int playerLevel) async {
-    final builds = await db.getBuildsByMinLevel(playerLevel);
-    if (builds.isNotEmpty) {
-      return builds.first;
-    }
-
-    return Build(
-      id: 'default',
-      name: 'Build Padrão',
-      description: 'Build padrão para começar',
-      type: 'PvE',
-      petIds: [],
-      heritageIds: [],
-      skillIds: [],
-      minLevel: 1,
-      efficiency: 50.0,
-      compatiblePhases: [],
-      strategy: 'Aumente seu nível primeiro',
-    );
-  }
-
-  // ============ ANÁLISE PVP ============
-
-  Future<List<Build>> analyzePvPOpponent({
+  Future<void> analyzePvPOpponent({
     required PvPOpponent opponent,
     required int playerLevel,
     required List<Pet> playerPets,
   }) async {
-    isAnalyzing = true;
+    _isAnalyzing = true;
+    _error = null;
     notifyListeners();
 
     try {
-      analyzedOpponent = opponent;
+      await Future.delayed(const Duration(milliseconds: 300));
 
-      // Encontrar elementos principais do oponente
-      final opponentPets = await Future.wait(
-        opponent.petIds.map((id) => db.getPetById(id)),
+      _suggestedCounterBuilds = _generateCounterBuilds(
+        opponent: opponent,
+        playerLevel: playerLevel,
+        playerPets: playerPets,
       );
-
-      final opponentElements =
-          opponentPets.whereType<Pet>().map((p) => p.element).toSet().toList();
-
-      // Buscar builds counter
-      final allBuilds = await db.getAllBuilds();
-      suggestedCounterBuilds = allBuilds
-          .where((build) =>
-              build.type == 'PvP' &&
-              build.minLevel <= playerLevel &&
-              _isCounterBuild(build, opponentElements, opponentPets.whereType<Pet>().toList()))
-          .toList()
-        ..sort((a, b) => b.efficiency.compareTo(a.efficiency));
-
-      error = null;
     } catch (e) {
-      error = 'Erro ao analisar oponente: $e';
-      suggestedCounterBuilds = [];
+      _error = 'Erro ao analisar oponente: $e';
     } finally {
-      isAnalyzing = false;
+      _isAnalyzing = false;
       notifyListeners();
     }
-
-    return suggestedCounterBuilds;
   }
 
-  bool _isCounterBuild(
-      Build build, List<String> opponentElements, List<Pet> opponentPets) {
-    // Simples verificação de contador de elemento
-    return true; // Pode ser expandido com lógica mais complexa
-  }
-
-  // ============ COMPARAÇÃO DE BUILDS ============
-
-  Map<String, dynamic> compareBuild(Build build1, Build build2) {
-    return {
-      'nameComparison': '${build1.name} vs ${build2.name}',
-      'efficiencyDiff': build1.efficiency - build2.efficiency,
-      'build1Better': build1.efficiency > build2.efficiency,
-      'recommendation':
-          build1.efficiency > build2.efficiency ? build1.name : build2.name,
-    };
-  }
-
-  // ============ OTIMIZAÇÃO ============
-
-  Future<Build> optimizeBuild({
-    required List<Pet> selectedPets,
-    required List<Heritage> selectedHeritages,
-    required List<Skill> selectedSkills,
-  }) async {
-    double efficiency = _calculateBuildEfficiency(
-      selectedPets,
-      selectedHeritages,
-      selectedSkills,
-    );
-
-    return Build(
-      id: 'optimized_${DateTime.now().millisecondsSinceEpoch}',
-      name: 'Build Otimizado',
-      description: 'Build otimizado para máxima eficiência',
-      type: 'PvE',
-      petIds: selectedPets.map((p) => p.id).toList(),
-      heritageIds: selectedHeritages.map((h) => h.id).toList(),
-      skillIds: selectedSkills.map((s) => s.id).toList(),
-      minLevel: selectedPets.isEmpty ? 1 : selectedPets.first.level,
-      efficiency: efficiency,
-      compatiblePhases: [],
-      strategy: 'Build customizado para máxima eficiência',
-    );
-  }
-
-  double _calculateBuildEfficiency(
-    List<Pet> pets,
-    List<Heritage> heritages,
-    List<Skill> skills,
+  int _calculateDifficulty(
+    int phaseNumber,
+    int playerLevel,
+    int playerAttack,
+    int playerDefense,
   ) {
-    double efficiency = 0;
+    final baseDifficulty = phaseNumber * 2;
+    final levelDiff = (playerLevel * 5) - baseDifficulty;
+    final statDiff = ((playerAttack + playerDefense) ~/ 2) - (phaseNumber * 3);
 
-    // Stats dos pets
-    final totalAttack =
-        pets.fold(0, (sum, p) => sum + p.attack).toDouble();
-    final totalDefense =
-        pets.fold(0, (sum, p) => sum + p.defense).toDouble();
-    final totalSpeed =
-        pets.fold(0, (sum, p) => sum + p.speed).toDouble();
-
-    efficiency += (totalAttack / pets.length.clamp(1, double.infinity)) * 0.4;
-    efficiency += (totalDefense / pets.length.clamp(1, double.infinity)) * 0.3;
-    efficiency += (totalSpeed / pets.length.clamp(1, double.infinity)) * 0.3;
-
-    // Bônus de heritages
-    efficiency += heritages.length * 5;
-
-    // Bônus de skills
-    efficiency += skills.length * 3;
-
-    return efficiency.clamp(0, 100);
+    return (baseDifficulty - (levelDiff ~/ 5) - (statDiff ~/ 10)).clamp(1, 10);
   }
 
-  // ============ FAVORITOS ============
+  Recommendation _generateRecommendation({
+    required int phaseNumber,
+    required int difficulty,
+    required int playerLevel,
+    required List<Pet> playerPets,
+  }) {
+    final isHighPriority = difficulty >= 7;
+    final recommendedBuild = _selectBestBuild(phaseNumber, playerLevel);
 
-  Future<void> addFavoriteBuild(String buildId) async {
-    await db.addFavorite('build', buildId);
+    return Recommendation(
+      title: isHighPriority ? 'Fase Muito Desafiadora' : 'Fase Viável',
+      description:
+          'Nível de dificuldade: ${difficulty.toStringAsFixed(1)}/10. '
+          'Seus pets atuais: ${playerPets.length}/3. ',
+      priority: isHighPriority ? 'HIGH' : 'MEDIUM',
+      action: isHighPriority
+          ? 'Aumente o level ou mude de build antes de enfrentar'
+          : 'Você pode enfrentar esta fase com preparação adequada',
+      expectedDifficultyReduction: (difficulty * 15).toInt().clamp(0, 80),
+      suggestedBuild: recommendedBuild,
+    );
+  }
+
+  Build _selectBestBuild(int phaseNumber, int playerLevel) {
+    // Mock implementation
+    return Build(
+      id: 'best_build_${phaseNumber}_${playerLevel}',
+      name: 'Build Otimizado Fase $phaseNumber',
+      description: 'Build customizado para máximo desempenho',
+      type: 'PvE',
+      petIds: ['pet_fire_1', 'pet_water_1', 'pet_grass_1'],
+      heritageIds: ['her_atk_1', 'her_def_1'],
+      skillIds: ['skill_fire_1', 'skill_water_1', 'skill_heal_1'],
+      minLevel: playerLevel - 5,
+      efficiency: 82.5,
+      compatiblePhases: [phaseNumber],
+      strategy: 'Estratégia otimizada para esta fase específica',
+    );
+  }
+
+  List<Build> _generateCounterBuilds({
+    required PvPOpponent opponent,
+    required int playerLevel,
+    required List<Pet> playerPets,
+  }) {
+    final counterBuilds = <Build>[];
+
+    // Mock counter builds baseado no elemento principal do oponente
+    if (opponent.mainElement == 'Fire') {
+      counterBuilds.add(Build(
+        id: 'counter_water_fire',
+        name: 'Counter Água vs Fogo',
+        description: 'Build específico contra pets de fogo',
+        type: 'PvP',
+        petIds: ['pet_water_1', 'pet_water_2', 'pet_water_3'],
+        heritageIds: ['her_def_1', 'her_spd_1'],
+        skillIds: ['skill_water_1', 'skill_water_3', 'skill_heal_1'],
+        minLevel: playerLevel - 3,
+        efficiency: 85.0,
+        compatiblePhases: [],
+        strategy: 'Use água para explorar fraqueza de fogo',
+      ));
+    } else if (opponent.mainElement == 'Water') {
+      counterBuilds.add(Build(
+        id: 'counter_grass_water',
+        name: 'Counter Grama vs Água',
+        description: 'Build específico contra pets de água',
+        type: 'PvP',
+        petIds: ['pet_grass_1', 'pet_grass_2', 'pet_grass_3'],
+        heritageIds: ['her_atk_1', 'her_spd_2'],
+        skillIds: ['skill_grass_1', 'skill_grass_2', 'skill_buff_1'],
+        minLevel: playerLevel - 3,
+        efficiency: 84.0,
+        compatiblePhases: [],
+        strategy: 'Use grama para explorar fraqueza de água',
+      ));
+    } else if (opponent.mainElement == 'Electric') {
+      counterBuilds.add(Build(
+        id: 'counter_grass_electric',
+        name: 'Counter Grama vs Elétrico',
+        description: 'Build específico contra pets elétricos',
+        type: 'PvP',
+        petIds: ['pet_grass_1', 'pet_grass_2', 'pet_grass_3'],
+        heritageIds: ['her_def_1', 'her_atk_1'],
+        skillIds: ['skill_grass_1', 'skill_grass_3', 'skill_heal_1'],
+        minLevel: playerLevel - 3,
+        efficiency: 83.0,
+        compatiblePhases: [],
+        strategy: 'Use grama para neutralizar ataques elétricos',
+      ));
+    }
+
+    return counterBuilds;
+  }
+
+  void clearRecommendation() {
+    _currentRecommendation = null;
+    _suggestedCounterBuilds = [];
     notifyListeners();
-  }
-
-  Future<void> removeFavoriteBuild(String buildId) async {
-    await db.removeFavorite('build', buildId);
-    notifyListeners();
-  }
-
-  Future<List<String>> getFavoriteBuilds() async {
-    return await db.getFavoritesByType('build');
   }
 }
