@@ -1,0 +1,63 @@
+name: legend_of_mushroom_bot
+description: "Android App - Legend of Mushroom Bot Guide with local cache"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI & Navigation
+  cupertino_icons: ^1.0.2
+  google_fonts: ^6.1.0
+  flutter_svg: ^2.0.7
+  
+  # State Management
+  provider: ^6.0.0
+  
+  # Database & Storage
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  path_provider: ^2.1.1
+  
+  # Camera & Vision
+  camera: ^0.10.5+2
+  image: ^4.1.1
+  google_mlkit_text_recognition: ^0.13.0
+  
+  # API & JSON
+  http: ^1.1.0
+  json_serializable: ^6.7.1
+  
+  # Utils
+  intl: ^0.19.0
+  uuid: ^4.0.0
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.0
+  build_runner: ^2.4.6
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/data/
+    - assets/icons/
+
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
